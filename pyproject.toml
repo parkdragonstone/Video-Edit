@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "videoEdit"
+version = "0.1.0"
+description = "비디오 파일 회전 및 프레임 설정 도구"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "parkdragonstone"}
+]
+keywords = ["video", "rotation", "fps", "video-editing", "gui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Display",
+]
+dependencies =  [
+    "opencv-python>=4.8.0",
+    "moviepy==1.0.3",
+    "pillow>=10.0.0",
+    "tkinterdnd2>=0.3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/parkdragonstone/Video-Edit"
+Repository = "https://github.com/parkdragonstone/Video-Edit.git"
+Issues = "https://github.com/parkdragonstone/Video-Edit/issues"
+
+[project.scripts]
+videoEdit = "videoEdit.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+videoEdit = []
