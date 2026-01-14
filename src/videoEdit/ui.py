@@ -3,6 +3,12 @@
 import tkinter as tk
 from tkinter import ttk
 
+# 직접 실행 시와 패키지로 import 시 모두 지원
+if __name__ == "__main__":
+    from video_processor import VideoProcessor
+else:
+    from .video_processor import VideoProcessor
+
 
 class UIManager:
     """UI 설정 및 관리 클래스."""
@@ -66,7 +72,7 @@ class UIManager:
         content_width = self.app.scrollable_frame.winfo_reqwidth()
         
         # 최대 너비 설정 (더 넓은 화면에서도 적절한 너비 유지)
-        max_width = 900
+        max_width = 750
         if content_width < max_width:
             content_width = max_width
         
@@ -95,6 +101,60 @@ class UIManager:
     
     def _on_mousewheel(self, event):
         """마우스 휠 이벤트 처리"""
+        # 재생 컨트롤 영역에 마우스가 있는지 확인하고 프레임 이동 처리
+        try:
+            if (hasattr(self.app, 'playback_frame') and self.app.playback_frame and 
+                hasattr(self.app, 'video_path') and self.app.video_path and 
+                hasattr(self.app, 'video_fps') and self.app.video_fps > 0):
+                
+                # 마우스 위치 확인
+                mouse_x = event.x_root
+                mouse_y = event.y_root
+                
+                playback_frame = self.app.playback_frame
+                playback_x = playback_frame.winfo_rootx()
+                playback_y = playback_frame.winfo_rooty()
+                playback_width = playback_frame.winfo_width()
+                playback_height = playback_frame.winfo_height()
+                
+                # 재생 컨트롤 프레임 내부인지 확인
+                if (playback_x <= mouse_x <= playback_x + playback_width and 
+                    playback_y <= mouse_y <= playback_y + playback_height):
+                    
+                    # 재생 컨트롤 영역이면 프레임 이동 처리
+                    # 스크롤 방향 확인
+                    frame_delta = -1 if (event.delta > 0 or event.num == 4) else 1
+                    
+                    # 현재 프레임에서 이동
+                    new_frame = self.app.current_frame + frame_delta
+                    new_frame = max(0, min(new_frame, self.app.total_frames - 1))
+                    
+                    # 시간 계산 및 이동
+                    new_time = new_frame / self.app.video_fps if self.app.video_fps > 0 else 0
+                    
+                    # 프레임 업데이트 (즉시 처리)
+                    self.app.current_frame = new_frame
+                    self.app.current_time = new_time
+                    
+                    # 재생 중이면 시작 시간 업데이트
+                    if self.app.is_playing:
+                        import time
+                        self.app._playback_start_time = time.time()
+                        self.app._playback_start_frame_time = new_time
+                    
+                    # 프레임 표시 및 UI 업데이트
+                    from .processors.video_processor import VideoProcessor
+                    VideoProcessor.seek_to_frame(self.app, new_time)
+                    if hasattr(self.app, 'time_slider'):
+                        self.app.time_slider.set(new_time)
+                    self.app.playback_controller._update_time_label()
+                    
+                    # 이벤트 전파 중지
+                    return
+        except Exception as e:
+            print(f"마우스 휠 처리 오류: {e}")
+        
+        # 재생 컨트롤 영역이 아니면 일반 스크롤 처리
         # Windows와 MacOS
         if event.delta:
             self.app.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -138,6 +198,100 @@ class UIManager:
         self.app.preview_canvas.bind("<Configure>", lambda _e: self.app._schedule_preview_redraw())
         self.app._draw_preview_placeholder()
 
+        # 재생 컨트롤 프레임
+        playback_frame = ttk.Frame(preview_frame)
+        playback_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # 재생 컨트롤 프레임 참조 저장 (마우스 휠 이벤트에서 사용)
+        self.app.playback_frame = playback_frame
+        
+        # 재생 컨트롤 프레임이 포커스를 받을 수 있도록 설정
+        playback_frame.configure(takefocus=True)
+        
+        # 재생 버튼
+        self.app.play_button = ttk.Button(playback_frame, text="▶ 재생", command=self.app.toggle_playback, state=tk.DISABLED)
+        self.app.play_button.pack(side=tk.LEFT, padx=5)
+        
+        # 시간 및 프레임 레이블 (통합)
+        self.app.time_label = ttk.Label(playback_frame, text="00:00:00 / 00:00:00 [0 / 0]")
+        self.app.time_label.pack(side=tk.LEFT, padx=10)
+        
+        # 재생 위치 슬라이더
+        slider_frame = ttk.Frame(playback_frame)
+        slider_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.app.time_slider = ttk.Scale(slider_frame, from_=0, to=100, orient=tk.HORIZONTAL)
+        self.app.time_slider.pack(fill=tk.X, expand=True)
+        
+        # 슬라이더 이벤트 바인딩 (드래그 중에는 재생 중지하지 않음)
+        def on_slider_change(event=None):
+            if hasattr(self.app, 'time_slider'):
+                value = self.app.time_slider.get()
+                self.app.seek_to_time(value)
+        
+        # 마우스 휠로 프레임 단위 이동 (최적화된 버전)
+        def on_slider_wheel(event):
+            if not self.app.video_path or self.app.video_fps <= 0:
+                return "break"
+            
+            # 스크롤 방향 확인
+            frame_delta = -1 if (event.delta > 0 or event.num == 4) else 1
+            
+            # 현재 프레임에서 이동
+            new_frame = self.app.current_frame + frame_delta
+            new_frame = max(0, min(new_frame, self.app.total_frames - 1))
+            
+            # 시간 계산 및 이동
+            new_time = new_frame / self.app.video_fps if self.app.video_fps > 0 else 0
+            
+            # 프레임 업데이트 (즉시 처리)
+            self.app.current_frame = new_frame
+            self.app.current_time = new_time
+            
+            # 재생 중이면 시작 시간 업데이트
+            if self.app.is_playing:
+                import time
+                self.app._playback_start_time = time.time()
+                self.app._playback_start_frame_time = new_time
+            
+            # 프레임 표시 및 UI 업데이트
+            from .processors.video_processor import VideoProcessor
+            VideoProcessor.seek_to_frame(self.app, new_time)
+            if hasattr(self.app, 'time_slider'):
+                self.app.time_slider.set(new_time)
+            self.app._update_time_label()
+            
+            # 이벤트 전파 중지
+            return "break"
+        
+        self.app.time_slider.bind("<Button-1>", lambda e: self.app.pause_playback())
+        self.app.time_slider.bind("<B1-Motion>", on_slider_change)
+        self.app.time_slider.bind("<ButtonRelease-1>", on_slider_change)
+        
+        # 재생 컨트롤 프레임과 모든 자식 위젯에 마우스 휠 이벤트 바인딩
+        # add="+" 없이 직접 바인딩하여 우선순위 높임
+        playback_frame.bind("<MouseWheel>", on_slider_wheel)
+        playback_frame.bind("<Button-4>", on_slider_wheel)  # Linux
+        playback_frame.bind("<Button-5>", on_slider_wheel)  # Linux
+        
+        slider_frame.bind("<MouseWheel>", on_slider_wheel)
+        slider_frame.bind("<Button-4>", on_slider_wheel)  # Linux
+        slider_frame.bind("<Button-5>", on_slider_wheel)  # Linux
+        
+        self.app.time_slider.bind("<MouseWheel>", on_slider_wheel)
+        self.app.time_slider.bind("<Button-4>", on_slider_wheel)  # Linux
+        self.app.time_slider.bind("<Button-5>", on_slider_wheel)  # Linux
+        
+        # 재생 버튼과 레이블에도 바인딩
+        self.app.play_button.bind("<MouseWheel>", on_slider_wheel)
+        self.app.play_button.bind("<Button-4>", on_slider_wheel)
+        self.app.play_button.bind("<Button-5>", on_slider_wheel)
+        
+        self.app.time_label.bind("<MouseWheel>", on_slider_wheel)
+        self.app.time_label.bind("<Button-4>", on_slider_wheel)
+        self.app.time_label.bind("<Button-5>", on_slider_wheel)
+        
+
         # UI 생성 이후에 drop target 확장 등록
         # (root는 init에서 이미 등록됨)
         self.app.drag_drop_handler.register_widget(file_frame)
@@ -157,6 +311,50 @@ class UIManager:
         ttk.Button(rotation_frame, text="리셋", command=lambda: self.app.rotate_video(0)).pack(side=tk.LEFT, padx=5)
         self.app.rotation_label = ttk.Label(rotation_frame, text="회전: 0°")
         self.app.rotation_label.pack(side=tk.LEFT, padx=10)
+        
+        # 구간 설정
+        time_range_frame = ttk.LabelFrame(control_frame, text="구간 설정", padding="5")
+        time_range_frame.pack(fill=tk.X, pady=5)
+        
+        # 단위 선택 (Radio 버튼)
+        unit_frame = ttk.Frame(time_range_frame)
+        unit_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(unit_frame, text="단위:").pack(side=tk.LEFT, padx=5)
+        self.app.range_unit_var = tk.StringVar(value="frame")
+        ttk.Radiobutton(unit_frame, text="프레임", variable=self.app.range_unit_var, 
+                       value="frame", command=lambda: self.app.set_range_unit_mode("frame")).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(unit_frame, text="초", variable=self.app.range_unit_var, 
+                       value="time", command=lambda: self.app.set_range_unit_mode("time")).pack(side=tk.LEFT, padx=5)
+        
+        range_inner_frame = ttk.Frame(time_range_frame)
+        range_inner_frame.pack(fill=tk.X)
+        
+        self.app.start_label = ttk.Label(range_inner_frame, text="시작 프레임:")
+        self.app.start_label.pack(side=tk.LEFT, padx=5)
+        self.app.start_time_var = tk.StringVar(value="0")
+        start_entry = ttk.Entry(range_inner_frame, textvariable=self.app.start_time_var, width=10)
+        start_entry.pack(side=tk.LEFT, padx=5)
+        start_entry.bind("<Return>", lambda e: self.app.set_start_time(self.app.start_time_var.get()))
+        start_entry.bind("<FocusOut>", lambda e: self.app.set_start_time(self.app.start_time_var.get()))
+        
+        self.app.end_label = ttk.Label(range_inner_frame, text="종료 프레임:")
+        self.app.end_label.pack(side=tk.LEFT, padx=5)
+        self.app.end_time_var = tk.StringVar(value="0")
+        end_entry = ttk.Entry(range_inner_frame, textvariable=self.app.end_time_var, width=10)
+        end_entry.pack(side=tk.LEFT, padx=5)
+        end_entry.bind("<Return>", lambda e: self.app.set_end_time(self.app.end_time_var.get()))
+        end_entry.bind("<FocusOut>", lambda e: self.app.set_end_time(self.app.end_time_var.get()))
+        
+        def reset_to_full_range():
+            """전체 구간으로 리셋."""
+            self.app.start_time = 0.0
+            self.app.end_time = self.app.video_duration
+            self.app.start_frame = 0
+            self.app.end_frame = self.app.total_frames
+            self.app.range_controller._update_range_ui()
+        
+        ttk.Button(range_inner_frame, text="전체 구간", command=reset_to_full_range).pack(side=tk.LEFT, padx=5)
         
         # FPS 설정
         fps_frame = ttk.Frame(control_frame)

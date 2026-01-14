@@ -90,6 +90,18 @@ class VideoProcessor:
             # MoviePy로도 로드 (편집용)
             app.video_clip = VideoFileClip(video_path)
             
+            # 재생 관련 변수 설정
+            app.video_duration = duration
+            app.video_fps = fps if fps > 0 else 30.0
+            app.total_frames = frame_count
+            app.current_time = 0.0
+            app.current_frame = 0
+            import tkinter as tk
+            if hasattr(app, 'time_slider'):
+                app.time_slider.config(to=duration)
+            if hasattr(app, 'play_button'):
+                app.play_button.config(state=tk.NORMAL)
+            
             # 정보 표시
             info = f"프레임 수: {frame_count:,}\n"
             info += f"FPS: {fps:.2f}\n"
@@ -120,48 +132,74 @@ class VideoProcessor:
     
     @staticmethod
     def update_preview(app):
-        """현재 rotation 상태를 반영해 첫 프레임을 미리보기 Canvas에 렌더링."""
+        """현재 rotation 상태를 반영해 현재 시간의 프레임을 미리보기 Canvas에 렌더링."""
+        if not app.video_path:
+            app._draw_preview_placeholder()
+            return
+        VideoProcessor.seek_to_frame(app, app.current_time)
+    
+    @staticmethod
+    def seek_to_frame(app, time_seconds):
+        """특정 시간의 프레임을 표시."""
         try:
-            if not getattr(app, "preview_canvas", None):
-                return
             if not app.video_path:
-                app._draw_preview_placeholder()
                 return
-
+            
+            # OpenCV로 특정 시간의 프레임 읽기
             cap = cv2.VideoCapture(app.video_path)
+            
+            # 프레임 번호 계산 (현재 프레임이 설정되어 있으면 사용)
+            if hasattr(app, 'current_frame') and app.current_frame >= 0:
+                frame_number = app.current_frame
+            else:
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps > 0:
+                    frame_number = int(time_seconds * fps)
+                else:
+                    frame_number = 0
+            
+            # 프레임 범위 체크
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frame_number >= total_frames:
+                frame_number = total_frames - 1
+            if frame_number < 0:
+                frame_number = 0
+            
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            
             ret, frame = cap.read()
             cap.release()
+            
             if not ret or frame is None:
-                app._draw_preview_placeholder("미리보기 프레임을 읽을 수 없습니다")
                 return
-
+            
             # Canvas 크기
             app.preview_canvas.update_idletasks()
             canvas_w = int(app.preview_canvas.winfo_width())
             canvas_h = int(app.preview_canvas.winfo_height())
             if canvas_w <= 2 or canvas_h <= 2:
                 canvas_w, canvas_h = 800, 450
-
+            
             # 1) 회전(전체가 잘리지 않도록 bounding box 확장)
             rotated = VideoProcessor.rotate_frame_keep_full(frame, app.rotation_angle)
-
+            
             # 2) Canvas에 '전체가 보이도록' 맞추기 (aspect 유지 + letterbox)
             fitted = VideoProcessor.letterbox_bgr(rotated, canvas_w, canvas_h)
-
+            
             # BGR -> RGB
             frame_rgb = cv2.cvtColor(fitted, cv2.COLOR_BGR2RGB)
-
+            
             from PIL import Image, ImageTk
             import tkinter as tk
             image = Image.fromarray(frame_rgb)
             photo = ImageTk.PhotoImage(image=image)
-
+            
             # Canvas에 표시 (이미지 참조 유지 필요)
             app._preview_image_tk = photo
             app.preview_canvas.delete("all")
             app._preview_canvas_image_id = app.preview_canvas.create_image(
                 canvas_w // 2, canvas_h // 2, image=photo, anchor=tk.CENTER
             )
-
+            
         except Exception as e:
-            print(f"미리보기 업데이트 오류: {e}")
+            print(f"프레임 이동 오류: {e}")

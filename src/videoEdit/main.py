@@ -1,10 +1,7 @@
 """Main GUI application for video rotation and export."""
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
-from pathlib import Path
 import os
-import threading
 import sys
 
 # 직접 실행 시 경로 추가
@@ -13,14 +10,22 @@ if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if current_dir not in sys.path:
         sys.path.insert(0, current_dir)
-    from drag_drop import DragDropHandler
-    from video_processor import VideoProcessor
+    from handlers.drag_drop import DragDropHandler
+    from processors.video_processor import VideoProcessor
     from ui import UIManager
+    from controllers.playback import PlaybackController
+    from controllers.export import ExportController
+    from handlers.file_handler import FileHandler
+    from controllers.range_controller import RangeController
 else:
     # 패키지로 import 시 상대 import
-    from .drag_drop import DragDropHandler
-    from .video_processor import VideoProcessor
+    from .handlers.drag_drop import DragDropHandler
+    from .processors.video_processor import VideoProcessor
     from .ui import UIManager
+    from .controllers.playback import PlaybackController
+    from .controllers.export import ExportController
+    from .handlers.file_handler import FileHandler
+    from .controllers.range_controller import RangeController
 
 
 class VideoEditApp:
@@ -29,7 +34,7 @@ class VideoEditApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Video Edit Tool")
-        self.root.geometry("940x700")
+        self.root.geometry("800x700")
         
         self.video_path = None
         self.video_clip = None
@@ -40,9 +45,30 @@ class VideoEditApp:
         self._preview_canvas_image_id = None
         self._preview_redraw_after_id = None
         
+        # 비디오 재생 관련
+        self.is_playing = False
+        self.current_time = 0.0
+        self.video_duration = 0.0
+        self.video_fps = 30.0
+        self.total_frames = 0
+        self.current_frame = 0
+        self._play_after_id = None
+        self._cap = None  # OpenCV VideoCapture
+        
+        # 구간 설정
+        self.start_time = 0.0
+        self.end_time = 0.0
+        self.start_frame = 0
+        self.end_frame = 0
+        self.range_unit_mode = "frame"  # "frame" or "time"
+        
         # 모듈 초기화
         self.drag_drop_handler = DragDropHandler(self)
         self.ui_manager = UIManager(self)
+        self.playback_controller = PlaybackController(self)
+        self.export_controller = ExportController(self)
+        self.file_handler = FileHandler(self)
+        self.range_controller = RangeController(self)
         
         # 드래그 앤 드롭 설정 (가능하면 root에 먼저 등록)
         self.drag_drop_handler.setup_drag_drop()
@@ -73,25 +99,38 @@ class VideoEditApp:
         
     def select_video(self):
         """비디오 파일 선택 다이얼로그."""
-        file_path = filedialog.askopenfilename(
-            title="비디오 파일 선택",
-            filetypes=[
-                ("비디오 파일", "*.mp4 *.avi *.mov *.mkv *.flv *.wmv"),
-                ("모든 파일", "*.*")
-            ]
-        )
-        
-        if file_path:
-            self.video_path = file_path
-            self.load_video_info()
-            self.update_output_path()
+        self.file_handler.select_video()
             
     def load_video_info(self):
         """비디오 정보 로드."""
+        # 기존 재생 중지
+        self.playback_controller.stop_playback()
+        from .processors.video_processor import VideoProcessor
         VideoProcessor.load_video_info(self.video_path, self)
+        # 구간 초기화 (전체 구간)
+        if self.video_duration > 0 and self.total_frames > 0:
+            self.start_time = 0.0
+            self.end_time = self.video_duration
+            self.start_frame = 0
+            self.end_frame = self.total_frames
+            if hasattr(self, 'start_time_var'):
+                if self.range_unit_mode == "frame":
+                    self.start_time_var.set("0")
+                else:
+                    self.start_time_var.set("0.00")
+            if hasattr(self, 'end_time_var'):
+                if self.range_unit_mode == "frame":
+                    self.end_time_var.set(str(self.total_frames))
+                else:
+                    self.end_time_var.set(f"{self.video_duration:.2f}")
+            self.range_controller._update_range_ui()
+        
+        # 시간 및 프레임 정보 즉시 업데이트
+        self.playback_controller._update_time_label()
             
     def update_preview(self):
         """미리보기 업데이트."""
+        from .processors.video_processor import VideoProcessor
         VideoProcessor.update_preview(self)
 
     def rotate_video(self, angle):
@@ -106,102 +145,54 @@ class VideoEditApp:
         self.rotation_label.config(text=f"회전: {self.rotation_angle}°")
         if self.video_path:
             self.update_preview()
-            
+    
     def update_output_path(self):
         """출력 경로 자동 업데이트."""
-        if self.video_path:
-            input_path = Path(self.video_path)
-            output_path = input_path.parent / f"{input_path.stem}_rotated{input_path.suffix}"
-            self.output_var.set(str(output_path))
-            self.output_path = str(output_path)
-            
+        self.file_handler.update_output_path()
+    
     def select_output_path(self):
         """출력 경로 선택 다이얼로그."""
-        if not self.video_path:
-            messagebox.showwarning("경고", "먼저 비디오 파일을 선택해주세요.")
-            return
-            
-        file_path = filedialog.asksaveasfilename(
-            title="출력 파일 저장",
-            defaultextension=".mp4",
-            filetypes=[
-                ("MP4 파일", "*.mp4"),
-                ("AVI 파일", "*.avi"),
-                ("모든 파일", "*.*")
-            ],
-            initialfile=os.path.basename(self.output_path) if self.output_path else "output.mp4"
-        )
-        
-        if file_path:
-            self.output_var.set(file_path)
-            self.output_path = file_path
-            
+        self.file_handler.select_output_path()
+    
     def export_video(self):
         """비디오 내보내기."""
-        if not self.video_path or not self.video_clip:
-            messagebox.showerror("오류", "비디오 파일을 먼저 선택해주세요.")
-            return
-            
-        output_path = self.output_var.get()
-        if not output_path:
-            messagebox.showerror("오류", "출력 경로를 설정해주세요.")
-            return
-            
-        try:
-            fps = float(self.fps_var.get())
-            if fps <= 0:
-                raise ValueError("FPS는 0보다 커야 합니다.")
-        except ValueError as e:
-            messagebox.showerror("오류", f"올바른 FPS 값을 입력해주세요.\n{str(e)}")
-            return
-            
-        # Export 버튼 비활성화 및 진행바 시작
-        self.export_button.config(state=tk.DISABLED)
-        self.progress.start()
-        
-        # 별도 스레드에서 export 실행
-        thread = threading.Thread(target=self._export_video_thread, args=(output_path, fps))
-        thread.daemon = True
-        thread.start()
-        
-    def _export_video_thread(self, output_path, fps):
-        """비디오 내보내기 스레드."""
-        try:
-            # 비디오 클립 복사
-            clip = self.video_clip.copy()
-            
-            if self.rotation_angle != 0:
-                clip = clip.rotate(-self.rotation_angle)
-            
-            # FPS 설정
-            if fps != self.video_clip.fps:
-                clip = clip.set_fps(fps)
-            
-            # Export
-            clip.write_videofile(
-                output_path,
-                fps=fps,
-                codec='libx264',
-                audio_codec='aac' if clip.audio else None,
-                preset='medium',
-                threads=4
-            )
-            clip.close()
-            
-            self.root.after(0, self._export_complete, True, "비디오가 성공적으로 export되었습니다!")
-            
-        except Exception as e:
-            self.root.after(0, self._export_complete, False, f"Export 중 오류가 발생했습니다:\n{str(e)}")
-            
-    def _export_complete(self, success, message):
-        """내보내기 완료 처리."""
-        self.progress.stop()
-        self.export_button.config(state=tk.NORMAL)
-        
-        if success:
-            messagebox.showinfo("완료", message)
-        else:
-            messagebox.showerror("오류", message)
+        self.export_controller.export_video()
+    
+    def toggle_playback(self):
+        """재생/일시정지 토글."""
+        self.playback_controller.toggle_playback()
+    
+    def start_playback(self):
+        """비디오 재생 시작."""
+        self.playback_controller.start_playback()
+    
+    def pause_playback(self):
+        """비디오 재생 일시정지."""
+        self.playback_controller.pause_playback()
+    
+    def stop_playback(self):
+        """비디오 재생 중지."""
+        self.playback_controller.stop_playback()
+    
+    def seek_to_time(self, time_value):
+        """특정 시간으로 이동."""
+        self.playback_controller.seek_to_time(time_value)
+    
+    def set_start_time(self, value_str):
+        """시작 시간/프레임 설정."""
+        self.range_controller.set_start_time(value_str)
+    
+    def set_end_time(self, value_str):
+        """종료 시간/프레임 설정."""
+        self.range_controller.set_end_time(value_str)
+    
+    def set_range_unit_mode(self, mode):
+        """구간 설정 단위 모드 변경."""
+        self.range_controller.set_range_unit_mode(mode)
+    
+    def _update_range_ui(self):
+        """구간 설정 UI 업데이트."""
+        self.range_controller._update_range_ui()
 
 
 def main():
