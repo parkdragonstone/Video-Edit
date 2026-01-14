@@ -1,5 +1,7 @@
 build/
+dist/
 src/videoEdit.egg-info/
+*.spec
 
 # Python cache files
 __pycache__/

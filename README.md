@@ -42,6 +42,37 @@ pip install -e .
 videoEdit
 ```
 
+### 방법 2: Python 스크립트 직접 실행
+
+```bash
+python src/videoEdit/main.py
+```
+
+### 방법 3: 실행 파일(.exe)로 실행
+
+Windows에서 실행 파일을 만들어 아이콘으로 실행할 수 있습니다:
+
+1. **PyInstaller 설치**:
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **실행 파일 빌드**:
+   ```bash
+   # Windows 배치 파일 사용
+   build.bat
+   
+   # 또는 Python 스크립트 직접 실행
+   python build_exe.py
+   ```
+
+3. **빌드 완료 후**:
+   - `dist/VideoEdit.exe` 파일이 생성됩니다
+   - 이 파일을 더블클릭하여 실행할 수 있습니다
+   - 바탕화면에 바로가기를 만들려면 `create_shortcut.bat`를 실행하세요
+
+**참고**: 실행 파일 빌드에 대한 자세한 내용은 [README_BUILD.md](README_BUILD.md)를 참조하세요.
+
 ## 사용 방법
 
 1. **비디오 파일 선택**: "비디오 파일 선택" 버튼을 클릭하여 처리할 비디오 파일을 선택합니다.
