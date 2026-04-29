@@ -5,9 +5,9 @@ from tkinter import ttk
 
 # 직접 실행 시와 패키지로 import 시 모두 지원
 if __name__ == "__main__":
-    from video_processor import VideoProcessor
+    from processors.video_processor import VideoProcessor
 else:
-    from .video_processor import VideoProcessor
+    from .processors.video_processor import VideoProcessor
 
 
 class UIManager:
